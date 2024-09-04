@@ -21,6 +21,7 @@ from process_TWH_bvh import wavlm_init, load_metadata
 import argparse
 
 
+
 speaker_id_dict = {
     2: 0,
     10: 1,
@@ -31,9 +32,9 @@ id_speaker_dict = {
     1: 10,
 }
 
-
+# TODO：增加了 nexpressions 参数
 def create_model_and_diffusion(args):
-    model = MDM(modeltype='', njoints=args.njoints, nfeats=1, cond_mode=config.cond_mode, audio_feat=args.audio_feat,
+    model = MDM(modeltype='', njoints=args.njoints, nfeats=1, nexpressions=args.nexpressions, cond_mode=config.cond_mode, audio_feat=args.audio_feat,
                 arch='trans_enc', latent_dim=args.latent_dim, n_seed=args.n_seed, cond_mask_prob=args.cond_mask_prob, device=device_name,
                 style_dim=args.style_dim, source_audio_dim=args.audio_feature_dim,
                 audio_feat_dim_latent=args.audio_feat_dim_latent)
@@ -75,6 +76,7 @@ def inference(args, save_dir, prefix, textaudio, sample_fn, model, n_frames=0, s
     if dataset == 'BEAT':
         data_mean_ = np.load("../process/gesture_BEAT_mean_" + args.version + ".npy")
         data_std_ = np.load("../process/gesture_BEAT_std_" + args.version + ".npy")
+        # TODO：在此处加入读取面部表情 均值 和 方差 的代码
     elif dataset == 'TWH':
         data_mean_ = np.load("../process/gesture_TWH_mean_v0" + ".npy")
         data_std_ = np.load("../process/gesture_TWH_std_v0" + ".npy")
@@ -110,13 +112,13 @@ def inference(args, save_dir, prefix, textaudio, sample_fn, model, n_frames=0, s
             # model_kwargs_['y']['seed'] = torch.zeros([1, args.njoints, 1, args.n_seed]).to(mydevice)
 
             if dataset == 'BEAT':
-
+                # TODO：增加面部表情部分
                 if speaker == 2:
                     seed_gesture = np.load("../../BEAT_dataset/processed/" + 'gesture_BEAT' + "/2_scott_0_1_1.npy")[:args.n_seed + 2]         # any speaker, here we only use seed pose of 2_scott_0_1_1.npy
                 elif speaker == 10:
                     seed_gesture = np.load("../../BEAT_dataset/processed/" + 'gesture_BEAT' + "/10_kieks_0_95_95.npy")[:args.n_seed + 2]
                 else:
-                    raise NotImplementedError
+                    raise NotImplementedError 
 
             elif dataset == 'TWH':
                 seed_gesture = np.load("../../TWH_dataset/processed/" + 'gesture_TWH' + "/val_2023_v0_014_main-agent.npy")[:args.n_seed + 2]
@@ -126,6 +128,7 @@ def inference(args, save_dir, prefix, textaudio, sample_fn, model, n_frames=0, s
             seed_gesture_acc = seed_gesture_vel[1:] - seed_gesture_vel[:-1]
             seed_gesture_ = np.concatenate((seed_gesture[2:], seed_gesture_vel[1:], seed_gesture_acc), axis=1)      # (args.n_seed, args.njoints)
             seed_gesture_ = torch.from_numpy(seed_gesture_).float().transpose(0, 1).unsqueeze(0).to(mydevice)
+            # TODO：需要在这里做表情手势特征融合，读取训练的融合模型
             model_kwargs_['y']['seed'] = seed_gesture_.unsqueeze(2)
 
         else:
@@ -176,7 +179,7 @@ def inference(args, save_dir, prefix, textaudio, sample_fn, model, n_frames=0, s
         motion_feature_division = 1
     else:
         raise ValueError("wrong version name")
-
+    # TODO：这后面要加上面部表情处理的代码，就是从 out_list 中解码出最终的 JSON 格式文件
     out_list = [i.detach().data.cpu().numpy()[:, :args.njoints // motion_feature_division] for i in out_list]
     if len(out_list) > 1:
         out_dir_vec_1 = np.vstack(out_list[:-1])
@@ -307,6 +310,9 @@ if __name__ == '__main__':
     if config.dataset == 'BEAT':
         config.style_dim = 2
         config.audio_feature_dim = 1434
+        # TODO：增健 面部表情维度
+        config.facial_dim = 51
+        config.nexpressions = 153
         if 'v0' in config.version:
             config.motion_dim = 684
             config.njoints = 2052
