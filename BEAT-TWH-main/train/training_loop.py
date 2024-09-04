@@ -19,10 +19,12 @@ import sys
 
 
 class TrainLoop:
-    def __init__(self, args, model, diffusion, device, data=None):
+    def __init__(self, args, model, diffusion, device, data=None, fusion_model=None):
         self.args = args
         self.data = data
         self.model = model
+        # TODO：在这里增加了一个处理面部表情和手势的模型
+        self.fusion_model = fusion_model
         self.diffusion = diffusion
         self.cond_mode = model.cond_mode
         self.batch_size = args.batch_size
@@ -108,15 +110,18 @@ class TrainLoop:
                     break
 
                 cond_ = {'y':{}}
-
-                wavlm, pose_seq, style = batch
+                # TODO：增加读取 面部表情
+                wavlm, pose_seq, express_seq, style = batch
+                # TODO：这里的 motion 需要结合面部表情，把他们当成一个整体
+                pose_seq = self.fusion_model(pose_seq, express_seq)
                 motion = pose_seq.permute(0, 2, 1).unsqueeze(2).to(self.device, non_blocking=True)
 
-                cond_['y']['seed'] = motion[..., 0:self.n_seed]
+                cond_['y']['seed'] = motion[..., 0:self.n_seed] # 取前面 30 帧
                 # cond_['y']['seed_last'] = motion[..., -self.n_seed:]        # attention5
                 cond_['y']['style'] = style.to(self.device, non_blocking=True)
                 cond_['y']['mask_local'] = self.mask_local_train
                 # cond_['y']['audio'] = wavlm.to(torch.float32).to(self.device, non_blocking=True)      # attention3
+                # 这里音频取 后面的 120 帧
                 cond_['y']['audio'] = wavlm.to(torch.float32)[:, self.n_seed:].to(self.device, non_blocking=True)       # attention4
                 # cond_['y']['audio'] = wavlm.to(torch.float32)[:, self.n_seed:-self.n_seed].to(self.device, non_blocking=True)  # attention5
                 cond_['y']['mask'] = self.mask_train        # [..., self.n_seed:]
@@ -155,6 +160,7 @@ class TrainLoop:
             last_batch = (i + self.microbatch) >= batch.shape[0]
             t, weights = self.schedule_sampler.sample(micro.shape[0], self.device)
 
+            # 这里的 micro 就是 GT
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
                 self.ddp_model,
@@ -219,6 +225,7 @@ class TrainLoop:
             "wb",
         ) as f:
             torch.save(self.opt.state_dict(), f)
+        # TODO：这里需要保存 融合特征 的模型
 
 
 def parse_resume_step_from_filename(filename):
