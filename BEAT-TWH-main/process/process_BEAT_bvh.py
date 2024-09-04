@@ -22,10 +22,13 @@ import io
 from tqdm import tqdm
 import string
 import h5py
+import json
+import math
 
 from anim import bvh, quat, txform
 from beat_data_proc.MyBVH import load_bvh_data
 from scipy.spatial.transform import Rotation
+from scipy.signal import resample
 
 import pdb
 
@@ -218,6 +221,25 @@ def Grid2tsv(TextGrid_path):
         for key in tg.tiers[0]:
             if key.mark == '': continue
             tsv_w.writerow([key.minTime, key.maxTime, key.mark])
+            
+            
+def load_facial(json_path, target_fps=60, original_fps=120):
+    # TODO：保持和动作一样的降采样率，读取json文件，存储为np.array格式，[nframes, dim]
+    # 读取JSON文件
+    with open(json_path, 'r') as f:
+        facial_data = json.load(f)
+    
+    # 提取weights并存储在numpy数组中
+    weights = np.array([frame['weights'] for frame in facial_data['frames']])
+
+    # 计算降采样后的帧数
+    num_original_frames = weights.shape[0]
+    num_target_frames = math.ceil(num_original_frames * target_fps / original_fps)
+    
+    # 对weights进行降采样
+    downsampled_weights = resample(weights, num_target_frames, axis=0)
+
+    return downsampled_weights
 
 
 def load_wordvectors(fname):  # take about 03:27
@@ -357,12 +379,16 @@ def make_gesture_dataset(base_path, save_path, preload=False, wavlm_model=None, 
     motion_save_path = os.path.join(save_path, 'gesture_BEAT')
     audio_save_path = os.path.join(save_path, 'audio_BEAT')
     text_save_path = os.path.join(save_path, 'text_BEAT')
+    
+    facial_save_path = os.path.join(save_path, 'facial_BEAT')
     if not os.path.exists(motion_save_path):
         os.makedirs(motion_save_path)
     if not os.path.exists(audio_save_path):
         os.makedirs(audio_save_path)
     if not os.path.exists(text_save_path):
         os.makedirs(text_save_path)
+    if not os.path.exists(facial_save_path):
+        os.makedirs(facial_save_path)
 
     if not preload:
         for speaker in os.listdir(base_path):
@@ -409,6 +435,15 @@ def make_gesture_dataset(base_path, save_path, preload=False, wavlm_model=None, 
                     Grid2tsv(tsvpath)
                     tsv = load_tsv(tsvpath.replace('.TextGrid', '.tsv'), word2vector, clip_len)
                     np.save(os.path.join(text_save_path, name + ".npy"), tsv)
+                    
+                # TODO: 增加面部数据读取，维度不需要扩展，用51个维度，np.array(nframes, dims)
+                if os.path.exists(os.path.join(facial_save_path, name + ".npy")):
+                    print(f'facial {name} exist')
+                else:
+                    jsonpath = bvh_file[:-4] + '.json'
+                    facial = load_facial(jsonpath)
+                    np.save(os.path.join(facial_save_path, name + '.npy'), facial)
+                    
 
     if preload:
         with h5py.File(f"BEAT_" + version + ".h5", "w") as h5:
@@ -428,14 +463,22 @@ def make_gesture_dataset(base_path, save_path, preload=False, wavlm_model=None, 
                     poses = np.load(os.path.join(motion_save_path, name + ".npy"))
                     wav = np.load(os.path.join(audio_save_path, name + ".npy"))
                     tsv = np.load(os.path.join(text_save_path, name + ".npy"))
+                    
+                    expressions = np.load(os.path.join(facial_save_path, name + '.npy'))
+                    # TODO：增加面部表情读取
                     clip_len = min(poses.shape[0], wav.shape[0], tsv.shape[0])
                     poses = poses[:clip_len]
                     wav = wav[:clip_len]
                     tsv = tsv[:clip_len]
+                    
+                    expression = expressions[:clip_len]
+                    
                     g_data.create_dataset("speaker_id", data=[speaker])  # TODO style
                     g_data.create_dataset("gesture", data=poses, dtype=np.float32)
                     g_data.create_dataset("audio", data=wav, dtype=np.float32)
                     g_data.create_dataset("text", data=tsv, dtype=np.float32)
+                    # TODO：增加面部表情数据集构建
+                    g_data.create_dataset("expression", data=expression, dtype=np.float32)
 
                     total_index += 1
 
