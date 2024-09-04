@@ -14,10 +14,11 @@ import sys
 from utils.model_util import create_gaussian_diffusion
 from training_loop import TrainLoop
 from model.mdm import MDM
+from model.fusion_model import FeatureFusion
 
 
 def create_model_and_diffusion(args):
-    model = MDM(modeltype='', njoints=args.njoints, nfeats=1, cond_mode=args.cond_mode, audio_feat=args.audio_feat,
+    model = MDM(modeltype='', njoints=args.njoints, nfeats=1, nexpressions=args.nexpressions, cond_mode=args.cond_mode, audio_feat=args.audio_feat,
                 arch='trans_enc', latent_dim=args.latent_dim, n_seed=args.n_seed, cond_mask_prob=args.cond_mask_prob, device=device_name,
                 style_dim=args.style_dim, source_audio_dim=args.audio_feature_dim, 
                 audio_feat_dim_latent=args.audio_feat_dim_latent)
@@ -28,7 +29,8 @@ def create_model_and_diffusion(args):
 def main(args):
     # Get data, data loaders and collate function ready
     print("Loading dataset into memory ...")
-    trn_dataset = SpeechGestureDataset(args.h5file, motion_dim=args.motion_dim, style_dim=args.style_dim,
+    # 这里添加了 面部表情参数
+    trn_dataset = SpeechGestureDataset(args.h5file, motion_dim=args.motion_dim, facial_dim=args.facial_dim, style_dim=args.style_dim,
                                        sequence_length=args.n_poses, npy_root="../process", 
                                        version=args.version, dataset=args.dataset)        # debug
 
@@ -40,7 +42,9 @@ def main(args):
 
     model, diffusion = create_model_and_diffusion(args)
     model.to(mydevice)
-    TrainLoop(args, model, diffusion, mydevice, data=train_loader).run_loop()
+    # TODO：这里增加融合面部表情和手势的卷积层，同时 TrainLoop 加了个参数
+    fusion_model = FeatureFusion(args.njoints, args.nexpressions, args.njoints)
+    TrainLoop(args, model, diffusion, mydevice, data=train_loader, fusion_model=fusion_model).run_loop()
 
 
 if __name__ == '__main__':
@@ -81,6 +85,9 @@ if __name__ == '__main__':
     if config.dataset == 'BEAT':
         config.style_dim = 2
         config.audio_feature_dim = 1434
+        # TODO：增加 面部表情的维度，应该是 51
+        config.facial_dim = 51
+        config.nexpressions = 153
         if 'v0' in config.version:
             config.motion_dim = 684
             config.njoints = 2052
