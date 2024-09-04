@@ -8,7 +8,7 @@ from local_attention.rotary import SinusoidalEmbeddings, apply_rotary_pos_emb
 from local_attention import LocalAttention
 
 class MDM(nn.Module):
-    def __init__(self, modeltype, njoints, nfeats,
+    def __init__(self, modeltype, njoints, nfeats, nexpressions,
                  latent_dim=256, ff_size=1024, num_layers=8, num_heads=4, dropout=0.1,
                  ablation=None, activation="gelu", legacy=False, data_rep='rot6d', dataset='amass', clip_dim=512,
                  arch='trans_enc', emb_trans_dec=False, audio_feat='', n_seed=1, cond_mode='', device='cpu', 
@@ -19,6 +19,8 @@ class MDM(nn.Module):
         self.modeltype = modeltype
         self.njoints = njoints
         self.nfeats = nfeats
+        # TODO：这里添加面部表情的拼接特征 原 + 速度差 + 加速度差
+        self.nexpressions = nexpressions
         self.data_rep = data_rep
         self.dataset = dataset
 
@@ -33,6 +35,7 @@ class MDM(nn.Module):
         self.activation = activation
         self.clip_dim = clip_dim
 
+        # TODO：这里也需要增加面部表情的维度
         self.input_feats = self.njoints * self.nfeats
 
         self.normalize_output = kargs.get('normalize_encoder_output', False)
@@ -55,6 +58,7 @@ class MDM(nn.Module):
         self.num_head = 8
 
         if 'style2' not in self.cond_mode:
+            # 将特征映射到 latent_dim
             self.input_process = InputProcess(self.data_rep, self.input_feats + self.audio_feat_dim + self.gru_emb_dim, self.latent_dim)
 
         if self.arch == 'trans_enc':
@@ -92,18 +96,21 @@ class MDM(nn.Module):
             print('EMBED STYLE ALL FRAMES')
             self.style_dim = 64
             self.embed_style = nn.Linear(style_dim, self.style_dim)
-            self.input_process = InputProcess(self.data_rep, self.input_feats + self.audio_feat_dim + self.gru_emb_dim + self.style_dim,
-                                              self.latent_dim)
+
+            self.input_process = InputProcess(self.data_rep, self.input_feats + self.audio_feat_dim + self.gru_emb_dim + self.style_dim, self.latent_dim)
             if self.n_seed != 0:
                 self.embed_text = nn.Linear(self.njoints * n_seed, self.latent_dim)
         elif self.n_seed != 0:
             self.embed_text = nn.Linear(self.njoints * n_seed, self.latent_dim)
 
+        # 这个的作用是将隐藏维度映射到 njoints
         self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
                                             self.nfeats)
 
         if 'cross_local_attention' in self.cond_mode:
+            # TODO：在这里添加面部表情的相关代码
             self.rel_pos = SinusoidalEmbeddings(self.latent_dim // self.num_head)
+            # 最终用的是这个 输入层
             self.input_process = InputProcess(self.data_rep, self.input_feats + self.gru_emb_dim, self.latent_dim)
             self.cross_local_attention = LocalAttention(
                 dim=48,  # dimension of each head (you need to pass this in for relative positional encoding)
@@ -137,7 +144,7 @@ class MDM(nn.Module):
         timesteps: [batch_size] (int)
         seed: [batch_size, njoints, nfeats]
         """
-
+        # x 是一个加了噪声的真值
         bs, njoints, nfeats, nframes = x.shape      # 64, 251, 1, 196
         emb_t = self.embed_timestep(timesteps)  # [1, bs, d], (1, 2, 256)
 
